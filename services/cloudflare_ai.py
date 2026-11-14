@@ -1,16 +1,6 @@
-"""
-Cloudflare Workers AI client for Speech-to-Text and Text Intelligence.
-Enforces a strict Free-Tier-Only architecture:
-- Primary STT: @cf/openai/whisper-large-v3-turbo (via Cloudflare Workers AI free allocation)
-- Optional Text: @cf/zai-org/glm-4.7-flash (via Cloudflare Workers AI free allocation)
-- Zero paid API dependencies (No OpenAI, No Gemini, No third-party paid transcription)
-- Graceful quota, rate-limit, and failure handling
-"""
+"""Optional Cloudflare Workers AI client for text analysis."""
 import os
-import io
 import json
-import base64
-import logging
 import requests
 from typing import Optional, Dict, Any
 from pathlib import Path
@@ -34,9 +24,6 @@ except ImportError:
                 pass
             break
 
-logger = logging.getLogger(__name__)
-
-
 def _cfg(name: str, default: str = "") -> str:
     """
     Read a setting from the environment first, then from Streamlit secrets
@@ -56,8 +43,7 @@ def _cfg(name: str, default: str = "") -> str:
     return default
 
 
-# Default model identifiers
-DEFAULT_STT_MODEL = _cfg("CLOUDFLARE_STT_MODEL", "@cf/openai/whisper-large-v3-turbo")
+# Default text model identifier
 DEFAULT_TEXT_MODEL = _cfg("CLOUDFLARE_TEXT_MODEL", "@cf/zai-org/glm-4.7-flash")
 
 BASE_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model_id}"
@@ -78,7 +64,7 @@ def is_configured() -> bool:
 def parse_cloudflare_error(resp: requests.Response) -> str:
     """
     Parse HTTP status and Cloudflare JSON payload into a friendly, actionable error message.
-    Detects quota exhaustion, authentication failure, audio format issues, and server downtime.
+    Detects quota exhaustion, authentication failure, request errors, and server downtime.
     """
     status_code = resp.status_code
     detail = ""
@@ -97,118 +83,11 @@ def parse_cloudflare_error(resp: requests.Response) -> str:
     elif status_code == 429:
         return f"Cloudflare Free-Tier Limit / Rate Limit Hit (HTTP 429): Daily free neurons allocation or request rate reached. Please use manual text fallback. ({detail})"
     elif status_code in (400, 415):
-        return f"Audio Format Not Accepted (HTTP {status_code}): Workers AI could not parse the audio. Please speak clearly or type below. ({detail})"
+        return f"Cloudflare rejected the text analysis request (HTTP {status_code}): {detail}"
     elif status_code >= 500:
         return f"Cloudflare Service Temporarily Unavailable (HTTP {status_code}): Upstream AI inference error. Your answer is safe; please retry or type manually. ({detail})"
     else:
         return f"Cloudflare API Error (HTTP {status_code}): {detail or resp.reason}"
-
-def run_stt_model(audio_bytes: bytes, language: Optional[str] = None, model_id: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Send audio bytes to Cloudflare Whisper model using Cloudflare Workers AI free allocation.
-    Uses base64 encoded audio in JSON payload as verified by Cloudflare API specifications.
-    Returns:
-      {
-        "success": bool,
-        "text": str,
-        "error": Optional[str],
-        "status_code": Optional[int]
-      }
-    """
-    if not is_configured():
-        return {
-            "success": False,
-            "text": "",
-            "error": "Cloudflare credentials not configured. App is running in Preview Mode.",
-            "status_code": None
-        }
-
-    acct = _cfg("CLOUDFLARE_ACCOUNT_ID")
-    token = _cfg("CLOUDFLARE_API_TOKEN")
-    model = model_id or DEFAULT_STT_MODEL
-    url = BASE_URL.format(account_id=acct, model_id=model)
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-
-    try:
-        # Base64 encoding as required by Cloudflare Workers AI REST API
-        b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
-        payload: Dict[str, Any] = {"audio": b64_audio}
-        if language in ("hi", "te", "en"):
-            payload["language"] = language
-
-        resp = requests.post(url, headers=headers, json=payload, timeout=40)
-
-        # Fallback to binary octet-stream only if JSON rejected
-        if resp.status_code in (400, 415) and "Request body is not valid json" in resp.text:
-            resp = requests.post(
-                url,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
-                data=audio_bytes,
-                timeout=40
-            )
-
-        if resp.status_code == 200:
-            data = resp.json()
-            if not data.get("success", True):
-                err_msg = parse_cloudflare_error(resp)
-                return {
-                    "success": False,
-                    "text": "",
-                    "error": err_msg,
-                    "status_code": 200
-                }
-
-            result = data.get("result")
-            transcribed_text = ""
-            if isinstance(result, dict):
-                transcribed_text = result.get("text", "") or result.get("vtt", "")
-            elif isinstance(result, str):
-                transcribed_text = result
-
-            clean_text = (transcribed_text or "").strip()
-            if not clean_text:
-                return {
-                    "success": False,
-                    "text": "",
-                    "error": "No audible speech recognized in the audio. Please speak clearly or enter text below.",
-                    "status_code": 200
-                }
-
-            return {
-                "success": True,
-                "text": clean_text,
-                "error": None,
-                "status_code": 200
-            }
-        else:
-            err_msg = parse_cloudflare_error(resp)
-            logger.warning("Cloudflare STT error: %s", err_msg)
-            return {
-                "success": False,
-                "text": "",
-                "error": err_msg,
-                "status_code": resp.status_code
-            }
-
-    except requests.exceptions.Timeout:
-        return {
-            "success": False,
-            "text": "",
-            "error": "Cloudflare API request timed out (40s). Connection may be slow. Please retry or enter text.",
-            "status_code": 408
-        }
-    except requests.exceptions.RequestException as e:
-        logger.exception("Cloudflare STT network exception")
-        return {
-            "success": False,
-            "text": "",
-            "error": f"Network error connecting to Cloudflare Workers AI: {str(e)}",
-            "status_code": None
-        }
 
 def run_text_model(prompt: str, system_prompt: Optional[str] = None, model_id: Optional[str] = None) -> Dict[str, Any]:
     """

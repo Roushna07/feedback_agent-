@@ -3,9 +3,9 @@ Village 360 — Main Application Entry Point
 Rural Healthcare Multilingual AI Feedback Agent
 
 Free-Tier-Only Architecture:
-- Primary STT: @cf/openai/whisper-large-v3-turbo (Cloudflare Workers AI Free Allocation)
+- Primary STT: Faster-Whisper multilingual model running locally on CPU
 - Translation Engine: Meta NLLB-200 distilled 600M INT8 via CTranslate2 (100% Offline CPU)
-- Optional Text Intelligence: @cf/zai-org/glm-4.7-flash (Cloudflare Workers AI Free Allocation)
+- Optional Text Intelligence: Cloudflare Workers AI
 - Zero paid API dependencies
 """
 import os
@@ -15,6 +15,7 @@ from agent.state_manager import init_agent_state
 from agent.conversation import render_conversation_step
 from admin.dashboard import render_admin_dashboard
 from services.cloudflare_ai import is_configured
+from services.local_transcription import get_local_stt_model_name
 from services.translation import get_engine_name
 from auth.supabase_auth import (
     auth_required,
@@ -404,7 +405,7 @@ if current_user:
         <div style="font-size: 0.75rem; color: #64748B; margin-top: 2px;"><code>{role_label}</code> · Camp: <strong>{camp_label}</strong></div>
     </div>
     """, unsafe_allow_html=True)
-    if st.sidebar.button("🚪 Sign Out", use_container_width=True):
+    if st.sidebar.button("🚪 Sign Out", width="stretch"):
         sign_out()
         st.rerun()
 
@@ -418,37 +419,24 @@ st.sidebar.divider()
 
 # Mode Status Badge
 cf_status = is_configured()
-if cf_status:
-    st.sidebar.markdown("""
-    <div style="background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 12px; padding: 12px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #065F46; font-size: 0.85rem;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #10B981; display: inline-block;"></span>
-            Live Cloudflare STT Active
-        </div>
-        <div style="font-size: 0.75rem; color: #047857; margin-top: 4px;">
-            Real-time Whisper Large V3 Turbo transcription enabled.
-        </div>
+st.sidebar.markdown(f"""
+<div style="background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #065F46; font-size: 0.85rem;">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #10B981; display: inline-block;"></span>
+        Local Whisper speech recognition
     </div>
-    """, unsafe_allow_html=True)
-else:
-    st.sidebar.markdown("""
-    <div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 12px; padding: 12px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #92400E; font-size: 0.85rem;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #F59E0B; display: inline-block;"></span>
-            Preview Demo Active
-        </div>
-        <div style="font-size: 0.75rem; color: #B45309; margin-top: 4px;">
-            Simulated speech transcription. Add credentials in <code>.env</code> for Live STT.
-        </div>
+    <div style="font-size: 0.75rem; color: #047857; margin-top: 4px;">
+        Model: {get_local_stt_model_name()}. Audio is transcribed locally; records save to SQLite.
     </div>
-    """, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
 
 # Technical architecture details in sidebar
 st.sidebar.markdown("""
 <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 12px; font-size: 0.74rem; color: #64748B; space-y: 4px;">
     <div><strong>Linguistic:</strong> Hindi (हिंदी) & Telugu (తెలుగు)</div>
     <div style="margin-top: 4px;"><strong>Translation:</strong> Meta NLLB-200 INT8 (CPU)</div>
-    <div style="margin-top: 4px;"><strong>Database:</strong> Local SQLite (37+ Sessions)</div>
+    <div style="margin-top: 4px;"><strong>Database:</strong> Local SQLite</div>
     <div style="margin-top: 4px;"><strong>Cost Tier:</strong> 100% Free / Zero Paid APIs</div>
 </div>
 """, unsafe_allow_html=True)
@@ -472,7 +460,7 @@ st.markdown("""
             <strong>Meta NLLB-200 INT8</strong> · Offline CPU
         </div>
         <div class="v360-pill info">
-            🎙️ <strong>Cloudflare Whisper STT</strong>
+            🎙️ <strong>Local Whisper STT</strong>
         </div>
     </div>
 </div>
@@ -505,7 +493,7 @@ elif app_mode == "📊 Admin Dashboard":
                 else:
                     st.error("Incorrect password.")
         else:
-            if st.sidebar.button("🚪 Log Out Admin", use_container_width=True):
+            if st.sidebar.button("🚪 Log Out Admin", width="stretch"):
                 st.session_state[auth_key] = False
                 st.rerun()
             render_admin_dashboard()
@@ -520,8 +508,8 @@ elif app_mode == "ℹ️ System Status & Diagnostics":
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 20px 0;">
         <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             <div style="font-size: 0.75rem; font-weight: 700; color: #0D9488; text-transform: uppercase;">Acoustic Recognition</div>
-            <div style="font-size: 1.15rem; font-weight: 800; color: #0F172A; margin: 4px 0;">Cloudflare Whisper</div>
-            <div style="font-size: 0.8rem; color: #64748B;">@cf/openai/whisper-large-v3-turbo via free daily allocation.</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #0F172A; margin: 4px 0;">Local Faster-Whisper</div>
+            <div style="font-size: 0.8rem; color: #64748B;">Runs on this computer's CPU; patient audio is not uploaded.</div>
         </div>
         <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             <div style="font-size: 0.75rem; font-weight: 700; color: #10B981; text-transform: uppercase;">Neural Translation</div>
@@ -543,7 +531,7 @@ elif app_mode == "ℹ️ System Status & Diagnostics":
 
     st.divider()
 
-    st.subheader("Cloudflare Workers AI Status")
+    st.subheader("Optional Cloudflare Text Analysis Status")
     from services.cloudflare_ai import _cfg
     acct = _cfg("CLOUDFLARE_ACCOUNT_ID")
     has_token = bool(_cfg("CLOUDFLARE_API_TOKEN"))
@@ -554,5 +542,5 @@ elif app_mode == "ℹ️ System Status & Diagnostics":
         st.write(f"- **Cloudflare Account ID:** `{masked_acct}`")
         st.write(f"- **Cloudflare API Token:** `{'Configured (Hidden)' if has_token else 'Not set'}`")
     with col_stat2:
-        st.write(f"- **Current Operational Mode:** {'🟢 Live Mode (Real Whisper inference)' if cf_status else '🟡 Preview Mode (Simulated demo)'}")
+        st.write(f"- **Text Analysis:** {'Configured' if cf_status else 'Not configured (local analysis fallback)'}")
         st.write(f"- **Translation Engine:** `{get_engine_name()}`")

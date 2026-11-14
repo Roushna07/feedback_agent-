@@ -124,7 +124,9 @@ def render_admin_dashboard():
                         plot_bgcolor="rgba(0,0,0,0)",
                         font=dict(family="Plus Jakarta Sans, Inter, sans-serif")
                     )
-                    st.plotly_chart(fig_lang, use_container_width=True)
+                    st.plotly_chart(
+                        fig_lang, width="stretch", key="language_distribution_chart"
+                    )
                 else:
                     st.bar_chart(lang_counts.set_index("Language"))
 
@@ -148,7 +150,9 @@ def render_admin_dashboard():
                             plot_bgcolor="rgba(0,0,0,0)",
                             font=dict(family="Plus Jakarta Sans, Inter, sans-serif")
                         )
-                        st.plotly_chart(fig_rating, use_container_width=True)
+                        st.plotly_chart(
+                            fig_rating, width="stretch", key="service_rating_chart"
+                        )
                     else:
                         st.bar_chart(ratings_df["rating"].value_counts().sort_index())
                 else:
@@ -189,11 +193,12 @@ def render_admin_dashboard():
                         plot_bgcolor="rgba(0,0,0,0)",
                         font=dict(family="Plus Jakarta Sans, Inter, sans-serif")
                     )
-                    st.plotly_chart(fig_q, use_container_width=True)
+                    st.plotly_chart(
+                        fig_q, width="stretch", key="question_response_chart"
+                    )
                 else:
                     pivot_df = q_summary.pivot(index="Question", columns="response_type", values="count").fillna(0)
                     st.bar_chart(pivot_df)
-                st.plotly_chart(fig_q, use_container_width=True)
 
     with tab2:
         st.subheader("All Collected Feedback Submissions")
@@ -265,7 +270,7 @@ def render_admin_dashboard():
 
             st.dataframe(
                 clean_display_df,
-                use_container_width=True,
+                width="stretch",
                 height=320
             )
 

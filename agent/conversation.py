@@ -5,7 +5,7 @@ Implements a fully automated 5-question patient interview:
 2. Bot speaks each question via browser Web Speech API (hi-IN / te-IN).
 3. Bot automatically starts microphone recording when speech ends.
 4. Silence detector automatically stops recording (10s silence after speech or 20s max duration).
-5. Audio is transcribed via Cloudflare Whisper Large V3 Turbo.
+5. Audio is transcribed locally with Faster-Whisper on the CPU.
 6. Answer is stored in SQLite and bot automatically advances to the next question.
 7. Staff controls provided for Pause, Resume, Repeat, Manual Correction, and End Interview.
 """
@@ -16,8 +16,8 @@ from .state_manager import start_new_session, reset_session_state
 from .voice_bot import render_voice_bot, decode_audio_payload
 from .rating_extractor import extract_rating
 from services.transcription import transcribe_audio
+from services.local_transcription import get_local_stt_model_name
 from services.translation import translate_patient_transcript
-from services.cloudflare_ai import is_configured
 from database.repository import save_feedback_answer, update_answer_translation, complete_feedback_session
 
 def render_welcome_and_consent():
@@ -36,31 +36,21 @@ def render_welcome_and_consent():
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🇮🇳 हिंदी (Hindi)", use_container_width=True, type="primary" if lang == "hi" else "secondary"):
+        if st.button("🇮🇳 हिंदी (Hindi)", width="stretch", type="primary" if lang == "hi" else "secondary"):
             st.session_state.language = "hi"
             st.rerun()
     with col2:
-        if st.button("🇮🇳 తెలుగు (Telugu)", use_container_width=True, type="primary" if lang == "te" else "secondary"):
+        if st.button("🇮🇳 తెలుగు (Telugu)", width="stretch", type="primary" if lang == "te" else "secondary"):
             st.session_state.language = "te"
             st.rerun()
 
     st.divider()
 
-    # Mode Notification Pill
-    if is_configured():
-        st.markdown("""
-        <div style="display: inline-flex; align-items: center; gap: 8px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; padding: 6px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 600; margin-bottom: 14px;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #10B981; display: inline-block;"></span>
-            System Mode: Live (Cloudflare Workers AI Free Tier Connected)
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="display: inline-flex; align-items: center; gap: 8px; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; padding: 6px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 600; margin-bottom: 14px;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #F59E0B; display: inline-block;"></span>
-            System Mode: Preview Demo (Transcription simulated for testing)
-        </div>
-        """, unsafe_allow_html=True)
+    st.info(
+        f"Speech transcription runs locally on this computer with Whisper "
+        f"({get_local_stt_model_name()}). The first recording may download the "
+        "model; patient audio is not uploaded."
+    )
 
     # Welcome Card with English translation
     st.info(get_ui_string("welcome", lang))
@@ -75,11 +65,11 @@ def render_welcome_and_consent():
             if lang == "hi" else
             "🚀 START AUTOMATED BOT (ఆటోమేటెడ్ బాట్‌ను ప్రారంభించండి)"
         )
-        if st.button(start_btn_label, use_container_width=True, type="primary"):
+        if st.button(start_btn_label, width="stretch", type="primary"):
             start_new_session(language=lang)
             st.rerun()
     with col_c2:
-        if st.button(get_ui_string("consent_no", lang), use_container_width=True):
+        if st.button(get_ui_string("consent_no", lang), width="stretch"):
             st.warning("Interview declined. Select language above when ready to begin.")
 
 def render_completion_screen():
@@ -98,7 +88,7 @@ def render_completion_screen():
         <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; gap: 16px; font-size: 0.82rem;">
             <span>Patient ID: <strong>{patient_code}</strong></span>
             <span>•</span>
-            <span>Persistence: <strong style="color: #6EE7B7;">Saved & Translated in SQLite</strong></span>
+            <span>Persistence: <strong style="color: #6EE7B7;">Saved in local SQLite</strong></span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -125,7 +115,7 @@ def render_completion_screen():
 
     st.divider()
     new_btn_label = "🚀 Start New Patient Interview (नया साक्षात्कार शुरू करें)" if lang == "hi" else "🚀 Start New Patient Interview (కొత్త ఇంటర్వ్యూ ప్రారంభించండి)"
-    if st.button(new_btn_label, use_container_width=True, type="primary"):
+    if st.button(new_btn_label, width="stretch", type="primary"):
         reset_session_state()
         st.rerun()
 
@@ -161,27 +151,27 @@ def render_conversation_step():
         c_ctrl1, c_ctrl2, c_ctrl3, c_ctrl4 = st.columns(4)
         with c_ctrl1:
             if st.session_state.get("bot_state") == "PAUSED":
-                if st.button("▶️ Resume Bot", use_container_width=True):
+                if st.button("▶️ Resume Bot", width="stretch"):
                     st.session_state.bot_state = "SPEAKING_QUESTION"
                     st.session_state.bot_command = "resume"
                     st.rerun()
             else:
-                if st.button("⏸️ Pause Bot", use_container_width=True):
+                if st.button("⏸️ Pause Bot", width="stretch"):
                     st.session_state.bot_state = "PAUSED"
                     st.session_state.bot_command = "pause"
                     st.rerun()
         with c_ctrl2:
-            if st.button("🔁 Repeat Question", use_container_width=True):
+            if st.button("🔁 Repeat Question", width="stretch"):
                 st.session_state.bot_command = "repeat"
                 st.session_state.bot_state = "SPEAKING_QUESTION"
                 st.rerun()
         with c_ctrl3:
-            manual_toggle = st.button("✏️ Toggle Manual Edit", use_container_width=True)
+            manual_toggle = st.button("✏️ Toggle Manual Edit", width="stretch")
             if manual_toggle:
                 st.session_state.manual_edit_mode = not st.session_state.get("manual_edit_mode", False)
                 st.rerun()
         with c_ctrl4:
-            if st.button("⏹️ End Interview", use_container_width=True):
+            if st.button("⏹️ End Interview", width="stretch"):
                 complete_feedback_session(session_id)
                 st.session_state.is_completed = True
                 st.rerun()
@@ -231,7 +221,7 @@ def render_conversation_step():
                 st.session_state.last_processed_payload_id = payload_id
                 raw_b64 = bot_payload.get("audio_base64", "")
 
-                with st.spinner("⏳ Converting patient speech to text with Cloudflare Whisper..."):
+                with st.spinner("⏳ Transcribing patient speech locally..."):
                     audio_bytes = decode_audio_payload(raw_b64)
                     res = transcribe_audio(audio_bytes, language=lang, question_number=current_q_num)
 
@@ -395,28 +385,36 @@ def render_conversation_step():
 
         col_save1, col_save2 = st.columns([2, 1])
         with col_save1:
-            if st.button("💾 Save Answer & Proceed ->", type="primary", use_container_width=True):
-                resp_text = manual_text.strip() or ("yes" if current_q_num == 4 else "open_response")
+            if st.button("💾 Save Answer & Proceed ->", type="primary", width="stretch"):
+                resp_text = manual_text.strip()
+                if not resp_text and current_q_num == 4:
+                    resp_text = manual_choice
+                elif not resp_text and current_q_num == 3:
+                    resp_text = f"Rating: {manual_rating}/5"
                 resp_type = manual_choice if current_q_num == 4 else ("rating" if current_q_num in (3, 5) else "open_response")
 
                 # 1. Save original answer immediately (must succeed to proceed)
-                save_ok = True
-                try:
-                    save_feedback_answer(
-                        session_id=session_id,
-                        question_number=current_q_num,
-                        question_text=q_text,
-                        transcript=resp_text,
-                        response_type=resp_type,
-                        rating=manual_rating,
-                        english_translation=None,
-                        translation_status="pending",
-                        source_language=lang
-                    )
-                except Exception as save_err:
-                    save_ok = False
-                    st.error(f"⚠️ Could not save the answer: {save_err}. "
-                             "The interview will not advance — please retry.")
+                save_ok = False
+                if not resp_text:
+                    st.error("Enter the patient's actual answer before saving.")
+                else:
+                    try:
+                        save_feedback_answer(
+                            session_id=session_id,
+                            question_number=current_q_num,
+                            question_text=q_text,
+                            transcript=resp_text,
+                            response_type=resp_type,
+                            rating=manual_rating,
+                            english_translation=None,
+                            translation_status="pending",
+                            source_language=lang
+                        )
+                    except Exception as save_err:
+                        st.error(f"⚠️ Could not save the answer: {save_err}. "
+                                 "The interview will not advance — please retry.")
+                    else:
+                        save_ok = True
 
                 if save_ok:
                     # 2. Local offline translation (optional, never blocks saving)
@@ -468,7 +466,7 @@ def render_conversation_step():
                     st.rerun()
 
         with col_save2:
-            if st.button("🔁 Re-record Voice", use_container_width=True):
+            if st.button("🔁 Re-record Voice", width="stretch"):
                 st.session_state.current_transcript = ""
                 st.session_state.manual_edit_mode = False
                 st.session_state.bot_command = "repeat"

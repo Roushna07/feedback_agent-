@@ -4,7 +4,7 @@ Database initialization and connection management.
 Two backends are supported (selected once per process):
 
   sqlite    (default)  -> existing local file database, unchanged behaviour
-  postgres  (supabase) -> set DB_BACKEND=postgres (or SUPABASE_DB_URL)
+  postgres  (supabase) -> set DB_BACKEND=postgres explicitly
 
 In PostgreSQL mode the schema is owned by the Supabase SQL migrations in
 `supabase/migrations/`; `init_db()` becomes a no-op so nothing local is
@@ -42,7 +42,7 @@ def get_backend() -> str:
     """Return 'sqlite' or 'postgres' for this process."""
     global _BACKEND
     if not _BACKEND:
-        _BACKEND = "postgres" if os.getenv("SUPABASE_DB_URL", "").strip() else "sqlite"
+        _BACKEND = os.getenv("DB_BACKEND", "").strip().lower() or "sqlite"
     if _BACKEND in ("postgres", "postgresql", "supabase"):
         return "postgres"
     return "sqlite"

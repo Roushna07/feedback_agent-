@@ -17,3 +17,6 @@ psycopg[binary]==3.3.9
 # TRANSLATION_BACKEND=off or =http to keep its ~650 MB RAM footprint unused.
 ctranslate2>=4.0.0,<5
 sentencepiece>=0.2.0,<1
+
+# Local offline multilingual speech transcription (CPU, int8).
+faster-whisper==1.2.1

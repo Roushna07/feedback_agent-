@@ -10,6 +10,16 @@ import pandas as pd
 from database.context import DEFAULT_CAMP_ID as DEFAULT_CAMP_ID_FALLBACK
 
 
+def test_sqlite_remains_default_when_supabase_url_is_configured(monkeypatch):
+    import database.db as db
+
+    monkeypatch.setattr(db, "_BACKEND", "")
+    monkeypatch.delenv("DB_BACKEND", raising=False)
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://configured.example/database")
+
+    assert db.get_backend() == "sqlite"
+
+
 def test_sqlite_backend_unchanged(sqlite_env):
     from database.db import get_backend, get_connection, init_db
     from database.repository import (

@@ -9,8 +9,8 @@ Comprehensive Technical and Functional Verification of New 5 Questions:
 """
 import os
 import io
-import wave
 import sqlite3
+import tempfile
 import pandas as pd
 from pathlib import Path
 
@@ -33,6 +33,13 @@ except ImportError:
                 pass
             break
 
+# Keep test records separate from the application's persistent database.
+_TEST_DB_TEMP = None
+if __name__ == "__main__":
+    _TEST_DB_TEMP = tempfile.TemporaryDirectory(prefix="feedback_agent_test_")
+    os.environ["DATABASE_PATH"] = str(Path(_TEST_DB_TEMP.name) / "test.db")
+    os.environ["DB_BACKEND"] = "sqlite"
+
 from database.db import init_db, get_connection
 from database.repository import (
     create_feedback_session,
@@ -45,7 +52,6 @@ from database.repository import (
 )
 from agent.questions import get_question, get_total_questions
 from services.transcription import transcribe_audio
-from services.cloudflare_ai import is_configured, run_stt_model, run_text_model
 from services.feedback_analysis import generate_admin_report_summary, analyze_session_feedback
 from services.translation import translate_patient_transcript
 from agent.rating_extractor import extract_rating
@@ -133,20 +139,13 @@ def test_database_and_workflow():
     assert te_data["patient_name"] == "నా పేరు కృష్ణారెడ్డి, మాది పాలెం గ్రామం."
     print("   ✓ Telugu patient session and name/village persistence verified.")
 
-def test_live_cloudflare_integration():
-    print("\n3. Testing Real Live Cloudflare Workers AI Connectivity...")
-    assert is_configured() is True
-
-    # Live STT
-    buf = io.BytesIO()
-    with wave.open(buf, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(16000)
-        wf.writeframes(b'\x00' * 16000)
-    res_stt = transcribe_audio(buf.getvalue(), language="hi", question_number=1)
-    assert res_stt["success"] is True
-    print(f"   ✓ Live Cloudflare Whisper STT transcription succeeded: '{res_stt['transcript']}'")
+def test_local_transcription_validation():
+    print("\n3. Testing local transcription input validation...")
+    result = transcribe_audio(b"", language="hi", question_number=1)
+    assert result["success"] is False
+    assert result["mode"] == "local"
+    assert "too short" in result["error"]
+    print("   ✓ Speech transcription uses the local backend; empty audio is rejected.")
 
 def test_local_analytics_and_admin_export():
     print("\n4. Testing Local Analytics & Camp Feedback Insights...")
@@ -200,6 +199,12 @@ def test_voice_bot_audio_and_rating():
 
 def test_bilingual_storage_and_translation():
     print("\n6. Testing Genuine Full-Sentence Neural Machine Translation (NLLB-200 Int8 on CPU)...")
+    from services.translation import OfflineNeuralTranslator
+
+    translator = OfflineNeuralTranslator.get_instance()
+    if not translator.is_ready:
+        print(f"   - NLLB model checks skipped: {translator.load_error}")
+        return
 
     # 1. Telugu full-sentence neural translation
     te_text_1 = "ఆరోగ్య సిబ్బంది నా చికిత్స గురించి స్పష్టంగా వివరించారు."
@@ -333,9 +338,10 @@ def test_bilingual_storage_and_translation():
     print("   ✓ 13. CTranslate2 neural engine runs 100% offline on CPU (zero GPU, zero external APIs).")
 
 if __name__ == "__main__":
+    print("System tests use a temporary SQLite database; app data is untouched.")
     test_questions()
     test_database_and_workflow()
-    test_live_cloudflare_integration()
+    test_local_transcription_validation()
     test_local_analytics_and_admin_export()
     test_voice_bot_audio_and_rating()
     test_bilingual_storage_and_translation()

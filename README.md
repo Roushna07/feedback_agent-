@@ -19,14 +19,15 @@ An AI-powered voice-first healthcare feedback collection system built for rural 
    - Offline CPU-only translation engine preserving clinical meaning, symptoms, and complaints.
    - Idempotent schema migration: `english_translation`, `translation_status`, `translation_engine`, `source_language`.
    - Side-by-side bilingual view in the administrative dashboard and bilingual CSV export.
-3. **Cloudflare Workers AI Speech-to-Text:**
-   - Integrates with `@cf/openai/whisper-large-v3-turbo` for multilingual transcription.
+3. **Local Speech-to-Text:**
+   - Runs multilingual Faster-Whisper on the local CPU; patient audio is not sent to Cloudflare.
+   - The model is downloaded once on first use and cached locally.
    - Live transcription confirmation and optional manual text editing before submitting.
-3. **Structured & Secure Storage:**
+4. **Structured & Secure Storage:**
    - Local SQLite database (`healthcare_feedback.db`).
    - Anonymous patient identification (`PAT-YYMMDD-XXXXXX`).
    - Full question, response, rating, and timestamp persistence.
-4. **Administrative Analytics Dashboard:**
+5. **Administrative Analytics Dashboard:**
    - Real-time KPIs: total submissions, completion rates, language distribution, average satisfaction rating.
    - Interactive Plotly visualizations for question breakdown, ratings, and language trends.
    - Drill-down session inspector to review all 5 answers of any patient.
@@ -58,10 +59,7 @@ An AI-powered voice-first healthcare feedback collection system built for rural 
            RECORD PATIENT AUDIO
                     │
                     ▼
-        CLOUDFLARE WORKERS AI
-                    │
-                    ▼
-              WHISPER MODEL
+          LOCAL WHISPER (CPU)
                     │
                     ▼
              SPEECH-TO-TEXT
@@ -111,8 +109,9 @@ feedbacksystem/
 │
 ├── services/                   # AI & Backend services
 │   ├── __init__.py
-│   ├── cloudflare_ai.py        # Cloudflare REST API client
-│   ├── transcription.py        # STT pipeline & fallback handling
+│   ├── cloudflare_ai.py        # Optional Cloudflare text analysis client
+│   ├── local_transcription.py  # Local CPU Whisper engine
+│   ├── transcription.py        # Local audio validation & transcription API
 │   ├── translation.py          # Offline local bilingual translation engine (HI, TE -> EN)
 │   └── feedback_analysis.py    # Analytical summarization & reporting
 │
@@ -139,28 +138,36 @@ feedbacksystem/
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment (Optional for Live Cloudflare Inference)
+### 2. Configure Environment
 Copy `.env.example` to `.env`:
 ```env
-CLOUDFLARE_ACCOUNT_ID=your_account_id
-CLOUDFLARE_API_TOKEN=your_api_token
-CLOUDFLARE_STT_MODEL=@cf/openai/whisper-large-v3-turbo
-CLOUDFLARE_TEXT_MODEL=@cf/zai-org/glm-4.7-flash
 DATABASE_PATH=data/healthcare_feedback.db
+LOCAL_STT_MODEL=base
 ADMIN_PASSWORD=admin123
 ```
-*(Note: If credentials are not set, the system runs automatically in **Preview Mode** with simulated Hindi/Telugu transcriptions so you can test end-to-end functionality right away).*
+The first recording downloads the selected Whisper model once. After that, speech is
+transcribed on your computer, and only the transcript is saved to SQLite; raw audio
+is kept in memory and discarded. Cloudflare credentials are optional and used only
+for optional text analysis.
 
 ### 3. Run Automated Tests
 ```bash
 python test_system.py
 ```
+The test script uses a temporary SQLite database and does not add sample records
+to the application's database. Translation checks are skipped with a clear
+message if the optional NLLB model weights are not installed.
 
 ### 4. Launch the Application
 ```bash
 python -m streamlit run app.py
 ```
 Open `http://localhost:8501` in your browser.
+
+Feedback is stored in the local SQLite file at `DATABASE_PATH` (by default,
+`data/healthcare_feedback.db`). Voice transcription runs locally; raw audio is
+discarded after transcription, while the transcript is saved locally.
+Supabase PostgreSQL is used only when `DB_BACKEND=postgres` is explicitly set.
 
 ---
 
