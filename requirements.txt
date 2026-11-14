@@ -1,0 +1,19 @@
+# Rural Healthcare Multilingual Feedback Agent — Python dependencies
+# Streamlit Community Cloud uses this file together with .python-version.
+# Versions are pinned to the set verified during Phase 1 preparation.
+
+streamlit==1.67.0
+requests==2.32.5
+python-dotenv==1.2.1
+pandas==3.0.1
+plotly==7.1.0
+
+# Supabase PostgreSQL access (application + Supabase Auth)
+supabase==2.34.1
+psycopg[binary]==3.3.9
+
+# Local offline NLLB translation engine (CPU, int8).
+# Only LOADED when TRANSLATION_BACKEND=local (default). Set
+# TRANSLATION_BACKEND=off or =http to keep its ~650 MB RAM footprint unused.
+ctranslate2>=4.0.0,<5
+sentencepiece>=0.2.0,<1
