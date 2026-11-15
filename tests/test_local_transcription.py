@@ -4,6 +4,12 @@ import wave
 from services import local_transcription, transcription
 
 
+def test_default_model_is_small_when_unconfigured(monkeypatch):
+    monkeypatch.delenv("LOCAL_STT_MODEL", raising=False)
+
+    assert local_transcription.get_local_stt_model_name() == "small"
+
+
 def _sample_wav(sample_rate: int = 16000, frames: int = 1600) -> bytes:
     output = io.BytesIO()
     with wave.open(output, "wb") as audio:

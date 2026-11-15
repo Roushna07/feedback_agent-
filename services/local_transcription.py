@@ -12,7 +12,7 @@ _MODEL_LOCK = threading.Lock()
 
 def get_local_stt_model_name() -> str:
     """Return the configured multilingual Whisper model name."""
-    return os.getenv("LOCAL_STT_MODEL", "base").strip() or "base"
+    return os.getenv("LOCAL_STT_MODEL", "small").strip() or "small"
 
 
 def _get_model():

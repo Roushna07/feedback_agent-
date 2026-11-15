@@ -1,15 +1,15 @@
 """
-Patient Conversation Controller for the Automated Multilingual Voice Interview Bot.
-Implements a fully automated 5-question patient interview:
+Patient Conversation Controller for the Multilingual Voice Interview Bot.
+Implements a guided 5-question patient interview:
 1. Staff selects language (Hindi/Telugu) and clicks START BOT.
 2. Bot speaks each question via browser Web Speech API (hi-IN / te-IN).
 3. Bot automatically starts microphone recording when speech ends.
-4. Silence detector automatically stops recording (10s silence after speech or 20s max duration).
+4. User manually stops recording and reviews/corrects the transcript.
 5. Audio is transcribed locally with Faster-Whisper on the CPU.
-6. Answer is stored in SQLite and bot automatically advances to the next question.
-7. Staff controls provided for Pause, Resume, Repeat, Manual Correction, and End Interview.
+6. The answer is translated to English before it is stored.
+7. Staff controls are provided for Pause, Resume, Repeat, Manual Correction, and End Interview.
 """
-import time
+from typing import Any, Dict, Optional
 import streamlit as st
 from .questions import get_question, get_total_questions, get_ui_string
 from .state_manager import start_new_session, reset_session_state
@@ -18,7 +18,57 @@ from .rating_extractor import extract_rating
 from services.transcription import transcribe_audio
 from services.local_transcription import get_local_stt_model_name
 from services.translation import translate_patient_transcript
-from database.repository import save_feedback_answer, update_answer_translation, complete_feedback_session
+from database.repository import save_feedback_answer, complete_feedback_session
+
+
+def _translate_and_save_english_answer(
+    session_id: int,
+    question_number: int,
+    question_text: str,
+    answer_text: str,
+    response_type: str,
+    rating: Optional[int],
+    source_language: str
+) -> Dict[str, Any]:
+    try:
+        translation = translate_patient_transcript(
+            answer_text,
+            source_language=source_language
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+    english_text = (translation.get("english_translation") or "").strip()
+    if not translation.get("success") or not english_text:
+        return {
+            "success": False,
+            "error": translation.get("error") or "No English translation was produced."
+        }
+
+    translation_status = translation.get("translation_status", "translated")
+    translation_engine = translation.get("translation_engine")
+    try:
+        save_feedback_answer(
+            session_id=session_id,
+            question_number=question_number,
+            question_text=question_text,
+            transcript=english_text,
+            response_type=response_type,
+            rating=rating,
+            english_translation=english_text,
+            translation_status=translation_status,
+            translation_engine=translation_engine,
+            source_language=source_language
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+    return {
+        "success": True,
+        "english_translation": english_text,
+        "translation_status": translation_status,
+        "translation_engine": translation_engine,
+    }
 
 def render_welcome_and_consent():
     """Step 1: Language selection, welcome message, and Start Bot action."""
@@ -56,7 +106,7 @@ def render_welcome_and_consent():
     st.info(get_ui_string("welcome", lang))
 
     st.markdown(f"### {get_ui_string('consent_question', lang)}")
-    st.caption("💡 *The automated bot will speak questions aloud and automatically record answers using speech activity & silence detection.*")
+    st.caption("💡 *The automated bot will speak questions aloud and record answers. Tap Stop Recording when the answer is complete.*")
 
     col_c1, col_c2 = st.columns([2, 1])
     with col_c1:
@@ -228,20 +278,14 @@ def render_conversation_step():
                     if res["success"]:
                         transcript_text = res["transcript"]
                         st.session_state.current_transcript = transcript_text
-                        st.toast("✅ Speech transcribed successfully!", icon="🎙️")
-
-                        # Question specific deterministic parsing
-                        selected_rating = None
-                        selected_response = "open_response"
+                        st.session_state[f"manual_text_{current_q_num}"] = transcript_text
+                        st.session_state.manual_edit_mode = True
+                        st.toast("Review the transcript before saving.", icon="🎙️")
 
                         if q_type == "rating_and_comment" or current_q_num in (3, 5):
-                            # Deterministically extract 1-5 rating from transcript
-                            extracted, src = extract_rating(transcript_text, language=lang)
-                            selected_rating = extracted or 5  # default 5 if positive comment without number
-                            selected_response = "rating"
-                            st.session_state.current_rating = selected_rating
+                            extracted, _ = extract_rating(transcript_text, language=lang)
+                            st.session_state.current_rating = extracted or 5
                         elif q_type == "boolean_choice" or current_q_num == 4:
-                            # Check yes/no
                             lower_t = transcript_text.lower()
                             if any(k in lower_t for k in ["हाँ", "yes", "అవును"]):
                                 selected_response = "yes"
@@ -249,89 +293,7 @@ def render_conversation_step():
                                 selected_response = "no"
                             else:
                                 selected_response = "yes"
-
-                        # 1. Persist original transcript immediately (authoritative original preserved).
-                        #    A save failure must never silently advance the interview.
-                        try:
-                            save_feedback_answer(
-                                session_id=session_id,
-                                question_number=current_q_num,
-                                question_text=q_text,
-                                transcript=transcript_text,
-                                response_type=selected_response,
-                                rating=selected_rating,
-                                english_translation=None,
-                                translation_status="pending",
-                                source_language=lang
-                            )
-                        except Exception as save_err:
-                            st.error(f"⚠️ Could not save the answer: {save_err}. "
-                                     "The interview will not advance — please retry.")
-                            st.session_state.manual_edit_mode = True
-                            save_ok = False
-                        else:
-                            save_ok = True
-
-                        if save_ok:
-
-                            # 2. Local offline translation into English.
-                            #    Translation is OPTIONAL: any failure leaves the
-                            #    original transcript safely stored with status='failed'.
-                            try:
-                                trans_res = translate_patient_transcript(transcript_text, source_language=lang)
-                            except Exception as trans_err:
-                                trans_res = {
-                                    "success": False,
-                                    "english_translation": "",
-                                    "translation_status": "failed",
-                                    "translation_engine": "none",
-                                    "error": str(trans_err)
-                                }
-                            eng_trans = trans_res.get("english_translation", "")
-                            trans_status = trans_res.get("translation_status", "failed")
-                            trans_engine = trans_res.get("translation_engine", "none")
-
-                            # 3. Update database record with English translation (best effort)
-                            try:
-                                update_answer_translation(
-                                    session_id=session_id,
-                                    question_number=current_q_num,
-                                    english_translation=eng_trans,
-                                    translation_status=trans_status,
-                                    translation_engine=trans_engine
-                                )
-                            except Exception as upd_err:
-                                st.warning("Answer saved, but the English translation "
-                                           f"could not be written yet ({upd_err}). "
-                                           "It can be retried from the dashboard.")
-
-                            st.session_state.answers_recorded[current_q_num] = {
-                                "question": q_text,
-                                "transcript": transcript_text,
-                                "english_translation": eng_trans,
-                                "translation_status": trans_status,
-                                "response": selected_response,
-                                "rating": selected_rating
-                            }
-
-                            # Check if complete or advance
-                            if current_q_num >= total_q:
-                                complete_feedback_session(session_id)
-                                st.session_state.is_completed = True
-                                st.session_state.bot_command = "stop"
-                                st.rerun()
-                            else:
-                                # Transition display with bilingual preview before next question
-                                if eng_trans:
-                                    st.success(f"✅ Answer saved ({lang.upper()}): \"{transcript_text[:30]}...\"\n\n🌐 English: \"{eng_trans[:45]}...\" Moving to Question {current_q_num + 1}...")
-                                else:
-                                    st.success(f"✅ Answer saved: \"{transcript_text[:40]}...\" Moving to Question {current_q_num + 1}...")
-                                time.sleep(1.2)
-                                st.session_state.current_question_index = current_q_num + 1
-                                st.session_state.current_transcript = ""
-                                st.session_state.current_rating = None
-                                st.session_state.bot_command = "speak_and_listen"
-                                st.rerun()
+                            st.session_state[f"manual_radio_{current_q_num}"] = selected_response
                     else:
                         st.error(f"⚠️ {res.get('error', 'Transcription failed')}")
                         st.session_state.manual_edit_mode = True
@@ -344,14 +306,19 @@ def render_conversation_step():
 
             elif action == "mic_error":
                 st.session_state.last_processed_payload_id = payload_id
-                st.error("⚠️ Microphone permission denied. Please enable manual entry below.")
+                error_message = bot_payload.get(
+                    "error",
+                    "Microphone permission denied. Please enable manual entry below."
+                )
+                st.error(f"⚠️ {error_message}")
                 st.session_state.manual_edit_mode = True
 
     # 3. MANUAL EDIT / FALLBACK REVIEW BOX
     # Allows staff to review, correct, or enter manual answers if microphone or API is restricted
     if st.session_state.get("manual_edit_mode") or st.session_state.get("current_transcript"):
         st.divider()
-        st.markdown("### ✏️ Transcript Review & Manual Answer Entry")
+        st.markdown("### ✏️ Review and Correct the Answer")
+        st.caption("Correct any misheard words before saving. Answers are translated to English; only English text is stored.")
 
         # Rating input if Question 3 or 5
         manual_rating = None
@@ -377,7 +344,7 @@ def render_conversation_step():
             )
 
         manual_text = st.text_area(
-            "Patient Answer Transcript (रोगी का उत्तर / రోగి సమాధానం):",
+            "Recognized answer (Hindi/Telugu):",
             value=st.session_state.get("current_transcript", ""),
             height=90,
             key=f"manual_text_{current_q_num}"
@@ -385,7 +352,7 @@ def render_conversation_step():
 
         col_save1, col_save2 = st.columns([2, 1])
         with col_save1:
-            if st.button("💾 Save Answer & Proceed ->", type="primary", width="stretch"):
+            if st.button("🌐 Translate & Save English Answer ->", type="primary", width="stretch"):
                 resp_text = manual_text.strip()
                 if not resp_text and current_q_num == 4:
                     resp_text = manual_choice
@@ -393,74 +360,48 @@ def render_conversation_step():
                     resp_text = f"Rating: {manual_rating}/5"
                 resp_type = manual_choice if current_q_num == 4 else ("rating" if current_q_num in (3, 5) else "open_response")
 
-                # 1. Save original answer immediately (must succeed to proceed)
+                save_result = None
                 save_ok = False
                 if not resp_text:
                     st.error("Enter the patient's actual answer before saving.")
                 else:
-                    try:
-                        save_feedback_answer(
-                            session_id=session_id,
-                            question_number=current_q_num,
-                            question_text=q_text,
-                            transcript=resp_text,
-                            response_type=resp_type,
-                            rating=manual_rating,
-                            english_translation=None,
-                            translation_status="pending",
-                            source_language=lang
-                        )
-                    except Exception as save_err:
-                        st.error(f"⚠️ Could not save the answer: {save_err}. "
-                                 "The interview will not advance — please retry.")
-                    else:
+                    save_result = _translate_and_save_english_answer(
+                        session_id=session_id,
+                        question_number=current_q_num,
+                        question_text=en_text,
+                        answer_text=resp_text,
+                        response_type=resp_type,
+                        rating=manual_rating,
+                        source_language=lang
+                    )
+                    if save_result["success"]:
                         save_ok = True
+                    else:
+                        st.error(f"⚠️ English translation/save failed: {save_result['error']}. "
+                                 "The answer was not saved; correct it or retry.")
 
-                if save_ok:
-                    # 2. Local offline translation (optional, never blocks saving)
-                    try:
-                        trans_res = translate_patient_transcript(resp_text, source_language=lang)
-                    except Exception as trans_err:
-                        trans_res = {
-                            "success": False,
-                            "english_translation": "",
-                            "translation_status": "failed",
-                            "translation_engine": "none",
-                            "error": str(trans_err)
-                        }
-                    eng_trans = trans_res.get("english_translation", "")
-                    trans_status = trans_res.get("translation_status", "failed")
-                    trans_engine = trans_res.get("translation_engine", "none")
-
-                    try:
-                        update_answer_translation(
-                            session_id=session_id,
-                            question_number=current_q_num,
-                            english_translation=eng_trans,
-                            translation_status=trans_status,
-                            translation_engine=trans_engine
-                        )
-                    except Exception as upd_err:
-                        st.warning("Answer saved, but the English translation "
-                                   f"could not be written yet ({upd_err}).")
+                if save_ok and save_result:
+                    eng_trans = save_result["english_translation"]
+                    trans_status = save_result["translation_status"]
 
                     st.session_state.answers_recorded[current_q_num] = {
                         "question": q_text,
-                        "transcript": resp_text,
+                        "transcript": eng_trans,
                         "english_translation": eng_trans,
                         "translation_status": trans_status,
                         "response": resp_type,
                         "rating": manual_rating
                     }
 
+                    st.session_state.current_transcript = ""
+                    st.session_state.current_rating = None
+                    st.session_state.manual_edit_mode = False
+
                     if current_q_num >= total_q:
                         complete_feedback_session(session_id)
                         st.session_state.is_completed = True
                     else:
                         st.session_state.current_question_index = current_q_num + 1
-                        st.session_state.current_transcript = ""
-                        st.session_state.current_rating = None
-                        st.session_state.manual_edit_mode = False
                         st.session_state.bot_command = "speak_and_listen"
 
                     st.rerun()

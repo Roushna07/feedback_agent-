@@ -519,7 +519,7 @@ elif app_mode == "ℹ️ System Status & Diagnostics":
         <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             <div style="font-size: 0.75rem; font-weight: 700; color: #3B82F6; text-transform: uppercase;">Persistence Layer</div>
             <div style="font-size: 1.15rem; font-weight: 800; color: #0F172A; margin: 4px 0;">SQLite Embedded</div>
-            <div style="font-size: 0.8rem; color: #64748B;">Bilingual records with authoritative original transcripts.</div>
+            <div style="font-size: 0.8rem; color: #64748B;">English answers are stored; raw audio is discarded.</div>
         </div>
         <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             <div style="font-size: 0.75rem; font-weight: 700; color: #8B5CF6; text-transform: uppercase;">Cost & Privacy</div>

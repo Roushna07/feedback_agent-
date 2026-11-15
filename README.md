@@ -7,22 +7,22 @@ An AI-powered voice-first healthcare feedback collection system built for rural 
 ## 🌟 Key Features
 
 1. **Fully Automated Voice Interview Bot:**
-   - Hands-free spoken interview: staff clicks "Start Bot", and the bot conducts the entire 5-question interview.
+   - Guided spoken interview: staff clicks "Start Bot"; the user taps **Stop Recording** after each answer.
    - Browser Web Speech API (`SpeechSynthesis`) speaks each question in natural Hindi (`hi-IN`) or Telugu (`te-IN`).
    - Web Audio API real-time microphone recording starts automatically once question speech completes.
-   - Automatic silence detection stops recording after 10 seconds of consecutive silence, or at a 20-second cap.
+   - Recording continues until **Stop Recording** is tapped; there is no duration limit or silence-based auto-stop.
    - Deterministic rating extraction for Hindi, Telugu, and English.
-   - In-memory 16kHz mono WAV encoding with zero persistent raw audio files on disk (patient privacy preserved).
+   - In-memory mono WAV audio is resampled to 16kHz for transcription; raw audio is never stored on disk.
    - Staff control toolbar: Pause, Resume, Repeat Question, Toggle Manual Correction, End Interview.
-2. **Bilingual Feedback Storage (Original Language + English):**
-   - Stores every patient answer in both its original language (Hindi/Telugu) and English.
-   - Offline CPU-only translation engine preserving clinical meaning, symptoms, and complaints.
-   - Idempotent schema migration: `english_translation`, `translation_status`, `translation_engine`, `source_language`.
-   - Side-by-side bilingual view in the administrative dashboard and bilingual CSV export.
+2. **English Feedback Storage:**
+   - Staff can review and correct each Hindi/Telugu transcript before saving.
+   - Answers are translated locally to English before database persistence; source-language answer text is not stored for new submissions.
+   - The database records the English answer, source language, and translation status.
+   - English answers appear in the administrative dashboard and CSV export.
 3. **Local Speech-to-Text:**
-   - Runs multilingual Faster-Whisper on the local CPU; patient audio is not sent to Cloudflare.
+   - Runs the multilingual Faster-Whisper `small` model on the local CPU by default; patient audio is not sent to Cloudflare.
    - The model is downloaded once on first use and cached locally.
-   - Live transcription confirmation and optional manual text editing before submitting.
+   - Review and correct recognized text before the English answer is saved.
 4. **Structured & Secure Storage:**
    - Local SQLite database (`healthcare_feedback.db`).
    - Anonymous patient identification (`PAT-YYMMDD-XXXXXX`).
@@ -104,7 +104,7 @@ feedbacksystem/
 │   ├── rating_extractor.py     # Deterministic rating extractor (HI, TE, EN)
 │   ├── state_manager.py        # Streamlit session state management
 │   ├── voice_bot.py            # Streamlit custom component wrapper
-│   └── voice_bot_component/    # Browser Web Speech & Web Audio silence detection
+│   └── voice_bot_component/    # Browser Web Speech & Web Audio recording controls
 │       └── index.html
 │
 ├── services/                   # AI & Backend services
@@ -142,13 +142,15 @@ pip install -r requirements.txt
 Copy `.env.example` to `.env`:
 ```env
 DATABASE_PATH=data/healthcare_feedback.db
-LOCAL_STT_MODEL=base
+LOCAL_STT_MODEL=small
 ADMIN_PASSWORD=admin123
 ```
-The first recording downloads the selected Whisper model once. After that, speech is
-transcribed on your computer, and only the transcript is saved to SQLite; raw audio
-is kept in memory and discarded. Cloudflare credentials are optional and used only
-for optional text analysis.
+The first recording downloads the selected Whisper model once. The default `small`
+model is more accurate than `base` but uses more CPU and memory; set it to `base`
+on lower-resource computers. Speech is transcribed locally; answers are reviewed,
+translated to English, and only the English text is saved. Raw audio stays in memory
+and is discarded. Cloudflare credentials are optional and used only for optional
+text analysis.
 
 ### 3. Run Automated Tests
 ```bash
@@ -162,7 +164,28 @@ message if the optional NLLB model weights are not installed.
 ```bash
 python -m streamlit run app.py
 ```
-Open `http://localhost:8501` in your browser.
+On the computer running the app, open `http://localhost:8501`. To use it on a
+phone, connect it to the same Wi-Fi network. The Network URL shown in the
+Streamlit terminal is plain HTTP; mobile browsers block microphone access over
+HTTP. A trusted HTTPS certificate and a hostname that resolves to the computer
+on the local network are required.
+
+For local HTTPS, obtain a certificate trusted by the phone, with the local
+hostname in its subject alternative names, and configure Streamlit's certificate
+and key paths in `.streamlit/config.toml`:
+
+```toml
+[server]
+sslCertFile = "C:/path/to/fullchain.pem"
+sslKeyFile = "C:/path/to/private-key.pem"
+```
+
+Keep the private key out of Git. Restart Streamlit and open
+`https://<your-local-hostname>:8501` on the phone. The phone must resolve that
+hostname to the computer and trust the certificate issuer; a self-signed
+certificate won't work unless its issuer is trusted on the phone. The app
+remains available only to devices that can reach the computer on the local
+network.
 
 Feedback is stored in the local SQLite file at `DATABASE_PATH` (by default,
 `data/healthcare_feedback.db`). Voice transcription runs locally; raw audio is

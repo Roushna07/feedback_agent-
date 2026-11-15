@@ -328,13 +328,11 @@ def test_bilingual_storage_and_translation():
     assert sample_rec["english_translation"] is not None
 
     df_export = pd.DataFrame(records)
-    df_export["original_transcript"] = df_export["transcript"]
-    assert "original_transcript" in df_export.columns
-    assert "english_translation" in df_export.columns
+    df_export["english_answer"] = df_export["english_translation"]
+    assert "english_answer" in df_export.columns
     csv_bytes = df_export.to_csv(index=False).encode("utf-8")
-    assert b"original_transcript" in csv_bytes
-    assert b"english_translation" in csv_bytes
-    print("   ✓ 12. Admin dashboard & CSV export contain both original_transcript and english_translation.")
+    assert b"english_answer" in csv_bytes
+    print("   ✓ 12. Admin dashboard & CSV export contain English answers.")
     print("   ✓ 13. CTranslate2 neural engine runs 100% offline on CPU (zero GPU, zero external APIs).")
 
 if __name__ == "__main__":

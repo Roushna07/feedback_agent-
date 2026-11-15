@@ -8,5 +8,9 @@ base = "light"
 
 [server]
 headless = true
+address = "0.0.0.0"
+# Set both certificate paths to enable HTTPS for mobile microphone access.
+sslCertFile = "C:/Users/roush/AppData/Local/Village360/certs/server.crt"
+sslKeyFile = "C:/Users/roush/AppData/Local/Village360/certs/server.key"
 enableCORS = false
 enableXsrfProtection = false

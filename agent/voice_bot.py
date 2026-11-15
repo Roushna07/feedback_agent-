@@ -1,6 +1,6 @@
 """
 Voice Bot Streamlit Component Wrapper.
-Bridges browser-based SpeechSynthesis, MediaRecorder, and Web Audio API silence detection with Python.
+Bridges browser-based SpeechSynthesis and Web Audio recording with Python.
 """
 import os
 import base64
@@ -22,7 +22,7 @@ def render_voice_bot(
 ) -> Optional[Dict[str, Any]]:
     """
     Renders the browser voice bot component.
-    Returns dictionary delivered by JavaScript upon audio recording, silence detection, or errors:
+    Returns dictionary delivered by JavaScript when recording is stopped, no speech is detected, or an error occurs:
       {
         "action": "audio_recorded" | "no_speech_detected" | "mic_error",
         "audio_base64": str,

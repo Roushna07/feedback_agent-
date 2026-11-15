@@ -75,7 +75,7 @@ def render_admin_dashboard():
             🏥 Healthcare Camp Administrator Dashboard
         </h2>
         <p style="color: #64748B; font-size: 0.88rem; margin: 0;">
-            Monitor patient experiences, evaluate health assistant services, and inspect bilingual neural transcriptions across rural camp clusters.
+            Monitor patient experiences, evaluate health assistant services, and inspect English feedback across rural camp clusters.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -246,7 +246,7 @@ def render_admin_dashboard():
                                        status, search, date_prefix)
         filtered_df = pd.DataFrame(page_records) if page_records else pd.DataFrame()
 
-        display_cols = [
+        record_cols = [
             "session_id", "patient_code", "patient_name", "language", "session_status",
             "question_number", "response_type", "transcript", "english_translation", "translation_status", "rating", "session_date"
         ]
@@ -255,18 +255,29 @@ def render_admin_dashboard():
             st.info("No feedback records match the current filters.")
         else:
             # Ensure display columns exist
-            for c in display_cols:
+            for c in record_cols:
                 if c not in filtered_df.columns:
                     filtered_df[c] = "-"
 
-            clean_display_df = filtered_df[display_cols].copy()
+            clean_display_df = filtered_df[record_cols].copy()
             clean_display_df["patient_name"] = clean_display_df["patient_name"].fillna("-")
             clean_display_df["question_number"] = clean_display_df["question_number"].fillna("-")
             clean_display_df["response_type"] = clean_display_df["response_type"].fillna("-")
-            clean_display_df["transcript"] = clean_display_df["transcript"].fillna("(No answer recorded)")
-            clean_display_df["english_translation"] = clean_display_df["english_translation"].fillna("(Pending / Not translated)")
+            english_answers = clean_display_df["english_translation"].fillna("").astype(str).str.strip()
+            clean_display_df["english_answer"] = english_answers.mask(
+                english_answers.eq(""),
+                "(English translation unavailable)"
+            )
             clean_display_df["translation_status"] = clean_display_df["translation_status"].fillna("pending")
             clean_display_df["rating"] = clean_display_df["rating"].fillna("-")
+            clean_display_df = clean_display_df.drop(columns=["transcript", "english_translation"])
+            clean_display_df = clean_display_df[
+                [
+                    "session_id", "patient_code", "patient_name", "language", "session_status",
+                    "question_number", "response_type", "english_answer", "translation_status",
+                    "rating", "session_date"
+                ]
+            ]
 
             st.dataframe(
                 clean_display_df,
@@ -274,30 +285,32 @@ def render_admin_dashboard():
                 height=320
             )
 
-        # Export CSV containing both original_transcript and english_translation
-        # (full filtered dataset, capped to keep free-tier memory bounded)
-        with st.spinner("Preparing bilingual CSV export..."):
+        # Export English answers only; cap the dataset to keep free-tier memory bounded.
+        with st.spinner("Preparing English CSV export..."):
             export_records = _cached_records(scope, EXPORT_ROW_LIMIT, 0, language,
                                              status, search, date_prefix)
         if export_records:
             export_df = pd.DataFrame(export_records)
-            for c in display_cols:
+            for c in record_cols:
                 if c not in export_df.columns:
                     export_df[c] = "-"
-            export_df = export_df[display_cols].copy()
-            export_df["original_transcript"] = export_df["transcript"]
-            # Reorder columns with explicit bilingual headers
+            export_df = export_df[record_cols].copy()
+            english_answers = export_df["english_translation"].fillna("").astype(str).str.strip()
+            export_df["english_answer"] = english_answers.mask(
+                english_answers.eq(""),
+                "(English translation unavailable)"
+            )
             csv_cols = [
                 "session_id", "patient_code", "patient_name", "language", "session_status",
-                "question_number", "response_type", "original_transcript", "english_translation", "translation_status", "rating", "session_date"
+                "question_number", "response_type", "english_answer", "translation_status", "rating", "session_date"
             ]
             csv_data = export_df[csv_cols].to_csv(index=False).encode("utf-8")
             if len(export_records) >= EXPORT_ROW_LIMIT:
                 st.warning(f"Export capped at {EXPORT_ROW_LIMIT} rows — narrow the filters for the complete dataset.")
             st.download_button(
-                label="📥 Export Feedback to CSV (Bilingual)",
+                label="📥 Export Feedback to CSV (English)",
                 data=csv_data,
-                file_name="healthcare_camp_bilingual_feedback.csv",
+                file_name="healthcare_camp_english_feedback.csv",
                 mime="text/csv"
             )
         else:
@@ -306,7 +319,7 @@ def render_admin_dashboard():
         st.divider()
 
         # Session drill down
-        st.subheader("🔍 Inspect Single Patient Session (Bilingual View)")
+        st.subheader("🔍 Inspect Single Patient Session (English View)")
         sessions = get_all_sessions(limit=50)
         if sessions:
             session_options = {
@@ -324,34 +337,18 @@ def render_admin_dashboard():
                 for a in s_data.get("answers", []):
                     q_info = get_question(a['question_number'])
                     en_text = q_info.get("en_text", "")
-                    with st.expander(f"Question {a['question_number']}: {a['question_text']}", expanded=True):
+                    question_text = en_text or a["question_text"]
+                    with st.expander(f"Question {a['question_number']}: {question_text}", expanded=True):
                         if en_text:
                             st.caption(f"🌐 **Question Translation:** {en_text}")
                         st.write(f"**Response:** `{a['response_type']}`" + (f" | **Rating:** {a['rating']} ⭐" if a.get('rating') else ""))
 
-                        # Side-by-side display of original transcript and English translation
-                        c_orig, c_trans = st.columns(2)
-                        with c_orig:
-                            st.markdown("##### 🗣️ Original Spoken Transcript")
-                            st.markdown(f"""
-                            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 14px; font-size: 0.9rem; color: #0F172A; min-height: 80px;">
-                                <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 4px;">
-                                    Language: {s_data.get('language', 'hi').upper()}
-                                </div>
-                                <em>"{a['transcript']}"</em>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with c_trans:
-                            st.markdown("##### ✨ Meta NLLB-200 English Translation")
-                            eng_text = a.get('english_translation') or a['transcript']
-                            st.markdown(f"""
-                            <div style="background: #F0FDFA; border: 1px solid #CCFBF1; border-radius: 12px; padding: 14px; font-size: 0.9rem; color: #0F766E; min-height: 80px;">
-                                <div style="font-size: 0.72rem; font-weight: 700; color: #0D9488; text-transform: uppercase; margin-bottom: 4px;">
-                                    Engine: {a.get('translation_engine', 'nllb-200-ctranslate2-int8')}
-                                </div>
-                                <strong>"{eng_text}"</strong>
-                            </div>
-                            """, unsafe_allow_html=True)
+                        english_answer = (a.get("english_translation") or "").strip()
+                        if english_answer:
+                            st.markdown("##### English Answer")
+                            st.write(english_answer)
+                        else:
+                            st.warning("English translation is unavailable for this answer.")
 
                 # Single session AI summary
                 if st.button("Generate AI Session Summary", key=f"ai_sum_{sel_id}"):
